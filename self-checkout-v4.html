@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>セルフレジ v4 — ポイントカード先読み方式</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:'Yu Gothic','游ゴシック','Noto Sans JP',sans-serif;
+  background:#1a1714;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:24px 0;
+  color:#fff;
+}
+.title{font-size:18px;margin-bottom:16px;color:#999;letter-spacing:0.05em}
+.device{width:1280px}
+.main{
+  display:grid;
+  grid-template-columns:240px 560px 1fr;
+  gap:24px;
+  height:720px;
+  align-items:stretch;
+}
+.panel{
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.panel-title{
+  padding:8px 4px 12px;
+  font-size:13px;font-weight:700;color:#999;
+  letter-spacing:0.1em;text-transform:uppercase;
+}
+
+/* === 筐体パネル === */
+.kiosk-panel{position:relative;overflow:visible}
+.kiosk-svg{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
+
+/* === 画面エリア === */
+.screen-area{
+  position:absolute;
+  top:30px;left:44px;
+  width:472px;height:390px;
+  background:#0f172a;
+  border-radius:10px;
+  z-index:10;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  box-shadow:inset 0 0 0 2px #000,inset 0 0 20px rgba(0,0,0,0.6);
+}
+.register-clock{
+  position:absolute;top:6px;right:12px;
+  font-size:11px;color:#556;font-family:monospace;z-index:11;
+}
+.screen-state{display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:16px 20px;position:relative}
+.screen-state.active{display:flex}
+.screen-num{position:absolute;top:6px;left:8px;background:rgba(100,116,139,0.7);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;font-weight:700;font-family:monospace;z-index:5}
+.screen-headline{font-size:22px;font-weight:700;margin-bottom:10px;color:#fff;text-align:center}
+.screen-sub{font-size:14px;color:#94a3b8;text-align:center;margin-bottom:14px;line-height:1.5}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 20px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .15s}
+.btn:hover{background:#2563eb}
+.btn-large{padding:16px;font-size:16px;width:100%;margin:5px 0}
+.btn-secondary{background:#475569}.btn-secondary:hover{background:#334155}
+.btn-warn{background:#dc2626}.btn-warn:hover{background:#b91c1c}
+.btn-success{background:#16a34a}.btn-success:hover{background:#15803d}
+.controls{display:flex;gap:8px;margin-top:8px}
+.controls .btn{flex:1;font-size:14px;padding:10px}
+.total-display{background:#1e293b;padding:10px 16px;border-radius:8px;text-align:right;font-size:16px;flex-shrink:0}
+.total-display .total-amount{font-size:28px;font-weight:900;color:#fbbf24}
+.cart-list{background:#1e293b;border-radius:8px;padding:10px;font-size:13px;margin-bottom:6px;overflow-y:auto;flex:1;min-height:0}
+.cart-row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #334155}
+.cart-row:last-child{border-bottom:none}
+.cart-row.duplicate{color:#fca5a5}
+.done-screen{text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1}
+.done-amount{font-size:26px;font-weight:900;color:#fbbf24;margin:10px 0}
+.staff-call{display:none}
+.beep{position:absolute;top:440px;left:360px;background:#22c55e;color:#fff;padding:6px 14px;border-radius:16px;font-weight:700;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20;white-space:nowrap}
+.beep.show{opacity:1}.beep.error{background:#dc2626}
+.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:50;border-radius:10px}
+.modal-backdrop.active{display:flex}
+.modal{background:#fff;color:#222;border-radius:12px;padding:24px;width:82%;max-width:360px;text-align:center}
+.modal h3{font-size:18px;margin-bottom:10px;color:#dc2626}
+.modal p{font-size:14px;margin-bottom:16px;line-height:1.5;color:#444}
+.modal .btn-row{display:flex;gap:10px;justify-content:center}
+.countdown{font-size:28px;font-weight:900;color:#dc2626;margin:10px 0}
+
+/* === スキャナー（中央下） === */
+.hw-scanner{
+  position:absolute;
+  top:455px;left:50%;transform:translateX(-50%);
+  width:140px;height:100px;
+  background:radial-gradient(circle at center,#1a0000 0%,#0a0000 80%);
+  border:3px solid #2a2a2a;border-radius:12px;
+  z-index:10;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;color:#7a3030;text-align:center;
+  box-shadow:inset 0 4px 10px rgba(0,0,0,0.8),0 0 20px rgba(220,38,38,0.4),0 0 40px rgba(220,38,38,0.2);
+  cursor:pointer;transition:all .2s;
+}
+.hw-scanner::before{
+  content:'';position:absolute;inset:6px;border-radius:8px;
+  background:radial-gradient(circle at center,rgba(239,68,68,0.3) 0%,transparent 70%);
+  pointer-events:none;animation:scanGlow 2s ease-in-out infinite;
+}
+@keyframes scanGlow{0%,100%{opacity:0.5}50%{opacity:1}}
+.hw-scanner.armed{border-color:#dc2626;box-shadow:inset 0 4px 10px rgba(0,0,0,0.8),0 0 28px rgba(220,38,38,0.7),0 0 56px rgba(220,38,38,0.4)}
+.hw-scanner.armed::after{content:'';position:absolute;top:8px;right:8px;width:5px;height:5px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:0.4}50%{opacity:1}}
+.hw-scanner.hover{border-color:#fbbf24;box-shadow:inset 0 4px 10px rgba(0,0,0,0.8),0 0 36px rgba(251,191,36,0.7)}
+.hw-scanner.scanning{border-color:#dc2626;box-shadow:inset 0 4px 10px rgba(0,0,0,0.8),0 0 50px rgba(220,38,38,1)}
+.scanner-laser{position:absolute;left:14%;right:14%;height:2px;background:#ef4444;box-shadow:0 0 10px #ef4444;top:50%;animation:laser 1.2s ease-in-out infinite;display:none;z-index:2}
+.hw-scanner.active .scanner-laser{display:block}
+@keyframes laser{0%,100%{top:18%}50%{top:82%}}
+#scanner-text{position:relative;z-index:1;color:#ff6b6b;font-weight:700;text-shadow:0 0 6px rgba(255,107,107,0.5)}
+.scan-counter{position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:10px;color:#666;font-family:monospace;white-space:nowrap}
+
+/* === カードリーダー（下部台右） === */
+.hw-card{
+  position:absolute;
+  top:580px;right:40px;
+  width:130px;height:140px;
+  background:#f5f0e4;
+  border:3px solid #3b82f6;border-radius:12px;
+  z-index:10;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;cursor:pointer;transition:all .2s;
+  box-shadow:0 0 16px rgba(59,130,246,0.3);
+}
+.hw-card .card-nfc{font-size:28px;opacity:0.5}
+.hw-card .card-label{font-size:11px;color:#3b82f6;font-weight:700}
+.hw-card.armed{box-shadow:0 0 24px rgba(59,130,246,0.6),0 0 48px rgba(59,130,246,0.3);border-color:#60a5fa}
+.hw-card.hover{box-shadow:0 0 36px rgba(96,165,250,0.8);border-color:#93c5fd}
+
+/* === 現金機械（下部台左） === */
+.hw-cash{
+  position:absolute;
+  top:570px;left:30px;
+  width:240px;height:140px;
+  background:#3a3a3a;
+  border-radius:8px;border:1px solid #555;
+  z-index:10;
+  display:flex;flex-direction:column;
+  padding:10px;gap:6px;
+}
+.cash-slot{
+  background:#0a0a0a;border:1px solid #555;border-radius:4px;
+  padding:8px 12px;font-size:11px;color:#60a5fa;font-family:monospace;
+  display:flex;align-items:center;
+}
+.cash-bill{height:36px}
+.cash-coin{height:36px}
+.cash-change{flex:1;font-size:12px;letter-spacing:0.1em}
+
+/* === 店員物理ボタン === */
+.hw-staff-btn{
+  position:absolute;
+  top:460px;right:40px;
+  width:50px;height:50px;
+  background:#dc2626;border-radius:50%;
+  z-index:10;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:#fff;font-size:16px;cursor:pointer;
+  box-shadow:0 4px 8px rgba(0,0,0,0.4),inset 0 2px 0 rgba(255,255,255,0.2);
+  border:2px solid #991b1b;
+  transition:transform .1s;
+}
+.hw-staff-btn:active{transform:scale(0.92)}
+.hw-staff-btn span{font-size:9px;font-weight:700;margin-top:1px}
+
+/* === 袋エリア === */
+.bag-content{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
+  padding:16px 10px;
+  background:linear-gradient(180deg,#3a352d 0%,#2a2520 100%);
+  border-radius:8px;box-shadow:inset 0 4px 10px rgba(0,0,0,0.4);border:1px solid #4a443a;
+}
+.bag-content.empty{justify-content:center;color:#776f63;font-size:13px;text-align:center;line-height:1.6}
+.bag-visual{
+  width:100%;min-height:300px;
+  border:3px dashed rgba(255,255,255,0.2);border-radius:8px;
+  display:flex;flex-direction:column-reverse;flex-wrap:wrap-reverse;gap:5px;padding:10px;
+  background:rgba(255,255,255,0.05);
+}
+.bag-visual.plastic{border-color:rgba(255,255,255,0.5);background:linear-gradient(180deg,rgba(255,255,255,0.15),rgba(255,255,255,0.05))}
+.bag-visual.mybag{border-color:#92400e;background:rgba(254,243,199,0.85);border-style:solid}
+.bag-visual.mybag .bag-item{background:#fff;color:#222}
+.bag-item{background:rgba(99,102,241,0.25);border:1px solid rgba(165,180,252,0.6);color:#e0e7ff;border-radius:6px;padding:3px 7px;font-size:12px;white-space:nowrap;display:flex;align-items:center;gap:3px}
+.bag-label{font-size:12px;color:#bbb;margin-top:8px}
+
+/* === 買い物カゴ === */
+.basket-content{
+  flex:1;padding:12px 10px;
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;align-content:start;
+  background:linear-gradient(180deg,#5a5751 0%,#3d3a35 100%);
+  border-radius:8px;box-shadow:inset 0 4px 10px rgba(0,0,0,0.4);border:1px solid #6a6760;
+  position:relative;
+}
+.basket-content::before{
+  content:'';position:absolute;inset:0;
+  background-image:linear-gradient(90deg,rgba(0,0,0,0.12) 1px,transparent 1px),linear-gradient(0deg,rgba(0,0,0,0.12) 1px,transparent 1px);
+  background-size:14px 14px;pointer-events:none;border-radius:8px;opacity:0.4;
+}
+.product{
+  background:#fff;border:2px solid #e5e7eb;border-radius:8px;
+  padding:8px 4px;text-align:center;cursor:grab;user-select:none;
+  transition:transform .1s,box-shadow .1s;position:relative;z-index:1;
+}
+.product:hover{border-color:#3b82f6;box-shadow:0 3px 10px rgba(59,130,246,0.2)}
+.product:active{cursor:grabbing}
+.product.dragging{opacity:0.6;transform:scale(0.95)}
+.product.scanned{background:rgba(255,255,255,0.15);border-color:rgba(22,163,106,0.3);pointer-events:none;opacity:0.3;position:relative}
+.product.scanned::after{content:'済';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:rgba(22,163,106,0.8);letter-spacing:0.1em}
+.product-icon{font-size:30px;margin-bottom:2px}
+.product-name{font-size:12px;font-weight:700;color:#222}
+.product-price{font-size:11px;color:#666;margin-top:1px}
+.product-barcode{
+  margin-top:3px;height:14px;display:flex;align-items:stretch;justify-content:center;gap:0;
+}
+.product-barcode i{display:inline-block;height:100%;background:#222;width:1px;margin:0 0.5px}
+.product-barcode i:nth-child(3n){width:2px}
+.product-barcode i:nth-child(5n+1){width:1.5px}
+.product-barcode i:nth-child(7n+2){margin:0 1px}
+.product-qty{font-size:10px;color:#dc2626;font-weight:700;background:#fee2e2;border-radius:8px;padding:1px 5px;display:inline-block;margin-top:2px}
+
+/* === 財布 === */
+.wallet-content{
+  flex:1;padding:16px 10px;display:flex;flex-direction:column;gap:8px;align-items:center;
+  background:linear-gradient(180deg,#3a352d 0%,#2a2520 100%);
+  border-radius:8px;box-shadow:inset 0 4px 10px rgba(0,0,0,0.4);border:1px solid #4a443a;
+}
+.wallet-prompt{font-size:12px;color:#bbb;text-align:center;margin-bottom:4px;line-height:1.5}
+.wallet-prompt strong{color:#fbbf24}
+.id-card{
+  width:100%;max-width:220px;height:54px;border-radius:8px;
+  display:flex;align-items:center;padding:6px 12px;
+  cursor:grab;user-select:none;font-size:12px;font-weight:700;color:#fff;
+  transition:transform .1s,box-shadow .1s;box-shadow:0 3px 6px rgba(0,0,0,0.4);
+}
+.id-card:hover{transform:translateY(-2px);box-shadow:0 5px 10px rgba(0,0,0,0.5)}
+.id-card:active{cursor:grabbing}
+.id-card.dragging{opacity:0.4}
+.id-card .card-icon{font-size:20px;margin-right:8px}
+.id-card .card-meta{font-size:9px;opacity:0.8;font-weight:400}
+.id-card.point{background:linear-gradient(135deg,#ea580c,#f97316)}
+.id-card.credit{background:linear-gradient(135deg,#1e40af,#3b82f6)}
+.id-card.health{background:linear-gradient(135deg,#15803d,#22c55e)}
+.id-card.license{background:linear-gradient(135deg,#831843,#be185d)}
+.id-card.shop{background:linear-gradient(135deg,#92400e,#d97706)}
+
+/* === 使い方ノート === */
+.note{margin-top:20px;width:1280px;background:#2a2a2a;padding:12px 18px;border-radius:8px;font-size:13px;color:#aaa;line-height:1.7}
+.note strong{color:#fbbf24}
+</style>
+</head>
+<body>
+<div class="title">セルフレジ デモ — 第7回 画面遷移図ワーク用教材
+  <span style="margin-left:24px;font-size:13px">
+    <a id="mode-simple" href="?simple" style="color:#22c55e;text-decoration:none;padding:4px 10px;border:1px solid #22c55e;border-radius:6px;margin-right:6px">シンプル</a>
+    <a id="mode-full" href="?" style="color:#f59e0b;text-decoration:none;padding:4px 10px;border:1px solid #f59e0b;border-radius:6px">フル</a>
+  </span>
+</div>
+<script>
+// 現在のモードをハイライト
+(function(){
+  const s=new URLSearchParams(location.search).has('simple');
+  const el=document.getElementById(s?'mode-simple':'mode-full');
+  if(el){el.style.background=s?'#22c55e':'#f59e0b';el.style.color='#fff';el.style.fontWeight='700'}
+  // フルモードのリンクはパラメータなしに
+  document.getElementById('mode-full').href=location.pathname;
+})();
+</script>
+<div class="device"><div class="main">
+<!-- 左：袋エリア -->
+<div class="panel bag-area">
+  <div class="panel-title">▼ サッカー台</div>
+  <div class="bag-content empty" id="bag-content">
+    <div>レジ操作を開始すると<br>ここに袋が出ます</div>
+  </div>
+</div>
+<!-- 中央：筐体 -->
+<div class="panel kiosk-panel" id="kiosk-panel">
+  <!-- SVG背景（z-index:1） -->
+  <svg class="kiosk-svg" viewBox="0 0 560 720" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="body-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f5f5f5"/>
+        <stop offset="50%" stop-color="#e8e8e8"/>
+        <stop offset="100%" stop-color="#d0d0d0"/>
+      </linearGradient>
+      <linearGradient id="base-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#e8e8e8"/>
+        <stop offset="100%" stop-color="#c8c8c8"/>
+      </linearGradient>
+    </defs>
+    <!-- 上部筐体（白） -->
+    <rect x="20" y="0" width="520" height="440" rx="14" fill="url(#body-grad)"/>
+    <rect x="20" y="0" width="520" height="440" rx="14" fill="none" stroke="#bbb" stroke-width="1.5"/>
+    <!-- ブランドロゴ -->
+    <text x="280" y="22" text-anchor="middle" font-family="monospace" font-size="11" font-weight="700" fill="#777" letter-spacing="3">● MART</text>
+    <!-- 電源LED -->
+    <circle cx="520" cy="16" r="3" fill="#22c55e" opacity="0.8"/>
+    <!-- ネジ穴（上部） -->
+    <circle cx="34" cy="12" r="2.5" fill="#bbb" stroke="#999" stroke-width="0.5"/>
+    <circle cx="526" cy="12" r="2.5" fill="#bbb" stroke="#999" stroke-width="0.5"/>
+    <!-- 下部台（白系） -->
+    <rect x="0" y="450" width="560" height="270" rx="10" fill="url(#base-grad)"/>
+    <rect x="0" y="450" width="560" height="270" rx="10" fill="none" stroke="#bbb" stroke-width="1"/>
+    <!-- ネジ穴（下部） -->
+    <circle cx="14" cy="462" r="2.5" fill="#bbb" stroke="#999" stroke-width="0.5"/>
+    <circle cx="546" cy="462" r="2.5" fill="#bbb" stroke="#999" stroke-width="0.5"/>
+    <circle cx="14" cy="706" r="2.5" fill="#bbb" stroke="#999" stroke-width="0.5"/>
+    <circle cx="546" cy="706" r="2.5" fill="#bbb" stroke="#999" stroke-width="0.5"/>
+    <!-- 通気口（下部台底） -->
+    <g opacity="0.3">
+      <rect x="200" y="700" width="160" height="2" rx="1" fill="#888"/>
+      <rect x="200" y="705" width="160" height="2" rx="1" fill="#888"/>
+      <rect x="200" y="710" width="160" height="2" rx="1" fill="#888"/>
+    </g>
+  </svg>
+
+  <!-- 画面（z-index:10） -->
+  <div class="screen-area" id="screen-area">
+    <div class="register-clock" id="clock">--:--:--</div>
+
+    <!-- S1: 待受 -->
+    <div class="screen-state active" data-screen="welcome">
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <div style="font-size:56px;margin-bottom:12px">🛒</div>
+        <div class="screen-headline">セルフレジ</div>
+        <div class="screen-sub">画面をタッチして<br>お買い物を始めてください</div>
+        <button class="btn btn-large btn-success" onclick="ensureAudio();goTo('point-ask')" style="max-width:280px;margin-top:16px">スタート</button>
+      </div>
+    </div>
+    <!-- S2: ポイントカード有無確認 -->
+    <div class="screen-state" data-screen="point-ask">
+      <div class="screen-headline">ポイントカードはお持ちですか？</div>
+      <div class="screen-sub">お持ちの方は先にカードを読み取ります</div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:0 20px">
+        <button class="btn btn-large btn-success" onclick="goTo('point-scan')">はい、持っています</button>
+        <button class="btn btn-large btn-secondary" onclick="goTo('bag-select')">いいえ、持っていません</button>
+      </div>
+    </div>
+    <!-- S2b: ポイントカード読み取り -->
+    <div class="screen-state" data-screen="point-scan">
+      <div class="screen-headline">ポイントカードをかざしてください</div>
+      <div class="screen-sub">右の財布から<strong style="color:#fbbf24">ポイントカード</strong>を<br>カードリーダーにかざしてください</div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center">
+        <div style="font-size:64px;animation:pulse 1.5s infinite">📶</div>
+      </div>
+      <button class="btn btn-secondary" onclick="goTo('bag-select')" style="align-self:center;max-width:200px">スキップ</button>
+    </div>
+    <!-- S3: 袋選択 -->
+    <div class="screen-state" data-screen="bag-select">
+      <div class="screen-headline">袋を選んでください</div>
+      <div class="screen-sub">必要な枚数を選択してください</div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:0 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#1e293b;padding:10px 14px;border-radius:8px">
+          <span style="font-size:15px">🛍️ レジ袋（大）<span style="color:#fbbf24;font-weight:700">5円</span></span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn" style="padding:6px 12px;font-size:16px;background:#475569" onclick="changeBagQty('large',-1)">－</button>
+            <span id="bag-large-qty" style="font-size:18px;font-weight:700;min-width:24px;text-align:center">0</span>
+            <button class="btn" style="padding:6px 12px;font-size:16px" onclick="changeBagQty('large',1)">＋</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#1e293b;padding:10px 14px;border-radius:8px">
+          <span style="font-size:15px">🛍️ レジ袋（小）<span style="color:#fbbf24;font-weight:700">3円</span></span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn" style="padding:6px 12px;font-size:16px;background:#475569" onclick="changeBagQty('small',-1)">－</button>
+            <span id="bag-small-qty" style="font-size:18px;font-weight:700;min-width:24px;text-align:center">0</span>
+            <button class="btn" style="padding:6px 12px;font-size:16px" onclick="changeBagQty('small',1)">＋</button>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:14px;color:#94a3b8;margin-top:4px">袋代合計: <span id="bag-total-display" style="color:#fbbf24;font-weight:700">¥0</span></div>
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button class="btn btn-large btn-secondary" onclick="confirmBag()" style="flex:1">👜 マイバッグ（袋不要）</button>
+          <button class="btn btn-large btn-success" onclick="confirmBag()" style="flex:1">次へ →</button>
+        </div>
+      </div>
+    </div>
+    <!-- S4: スキャン中 -->
+    <div class="screen-state" data-screen="scan">
+      <div class="screen-headline" style="font-size:18px">商品をスキャナーにかざしてください</div>
+      <div class="cart-list" id="cart-list"><div style="color:#64748b;text-align:center">まだ何もスキャンされていません</div></div>
+      <div class="total-display">合計 <span class="total-amount" id="total-amount">¥0</span></div>
+      <div class="controls">
+        <button class="btn btn-secondary" onclick="$('cancel-modal').classList.add('active')">取り消し</button>
+        <button class="btn btn-success" onclick="onCheckoutClick()">会計へ進む</button>
+      </div>
+    </div>
+    <!-- S5: 確認 -->
+    <div class="screen-state" data-screen="confirm">
+      <div class="screen-headline">ご確認ください</div>
+      <div class="cart-list" id="confirm-list"></div>
+      <div id="earn-points" style="font-size:13px;color:#4ade80;text-align:center;padding:4px 0"></div>
+      <div class="total-display">お支払い金額 <span class="total-amount" id="confirm-amount">¥0</span></div>
+      <div class="controls">
+        <button class="btn btn-secondary" onclick="goTo('scan')">戻る</button>
+        <button class="btn btn-success" onclick="goTo('pay-tap')">支払いへ</button>
+      </div>
+    </div>
+    <!-- S6: 支払い -->
+    <div class="screen-state" data-screen="pay-tap">
+      <div class="screen-headline">お支払い</div>
+      <div class="screen-sub">右の財布から<strong style="color:#fbbf24">支払いに使うカード</strong>を<br>カードリーダーにかざしてください</div>
+      <div class="total-display" style="margin-top:auto">お支払い金額 <span class="total-amount" id="pay-amount">¥0</span></div>
+      <div class="controls"><button class="btn btn-secondary" onclick="goTo('confirm')">戻る</button></div>
+    </div>
+    <!-- S7: 完了 -->
+    <div class="screen-state" data-screen="done">
+      <div class="done-screen">
+        <div style="font-size:64px;margin-bottom:12px">✅</div>
+        <div class="screen-headline">ありがとうございました</div>
+        <div class="done-amount" id="done-amount">¥0</div>
+        <div class="screen-sub" id="done-countdown">3秒後に初期画面に戻ります...</div>
+      </div>
+    </div>
+
+    <!-- 店員呼び出しは物理ボタンのみ（画面内ボタン廃止） -->
+
+    <!-- モーダル群 -->
+    <div class="modal-backdrop" id="idle-modal"><div class="modal"><h3>⚠ 操作が止まっています</h3><p>続けますか？</p><div class="countdown" id="idle-countdown">15</div><div class="btn-row"><button class="btn btn-warn" onclick="resetAll()">最初から</button><button class="btn btn-success" onclick="resumeIdle()">続ける</button></div></div></div>
+    <div class="modal-backdrop" id="cancel-modal"><div class="modal"><h3>本当に取り消しますか？</h3><p>スキャン済みの商品はすべて消去されます。</p><div class="btn-row"><button class="btn btn-secondary" onclick="closeCancelModal()">いいえ</button><button class="btn btn-warn" onclick="resetAll()">はい、取り消す</button></div></div></div>
+    <div class="modal-backdrop" id="staff-modal"><div class="modal"><h3>🛎️ 店員を呼んでいます</h3><p>少々お待ちください。</p><div id="staff-dup-section" style="display:none;margin:12px 0;padding:10px;background:#fef2f2;border-radius:8px;text-align:left"><p style="font-size:13px;color:#dc2626;font-weight:700;margin-bottom:6px">⚠ 重複スキャンがあります</p><div id="staff-dup-list" style="font-size:12px;color:#666;margin-bottom:8px"></div><button class="btn btn-warn" onclick="staffRemoveDuplicates()" style="width:100%;font-size:13px">重複分を取り消す</button></div><div class="btn-row"><button class="btn btn-secondary" onclick="closeStaffModal()">閉じる</button></div></div></div>
+    <div class="modal-backdrop" id="dup-confirm-modal"><div class="modal"><h3 style="color:#f59e0b">⚠ 同じ商品です</h3><p id="dup-confirm-text">この商品は既にスキャン済みです。<br>もう1点追加しますか？</p><div class="btn-row"><button class="btn btn-secondary" onclick="denyDuplicate()">いいえ（誤読み取り）</button><button class="btn btn-success" onclick="confirmDuplicate()">はい、追加する</button></div></div></div>
+    <div class="modal-backdrop" id="age-modal"><div class="modal"><h3 style="color:#1a365d">🍺 年齢確認</h3><p>酒類が含まれています。<br><strong>20歳以上ですか？</strong></p><p style="font-size:13px;color:#666;margin-top:-10px">確認するまで他の商品もスキャンできません。</p><div class="btn-row"><button class="btn btn-secondary" onclick="ageDeny()">いいえ</button><button class="btn btn-success" onclick="ageConfirm()">はい、20歳以上です</button></div></div></div>
+  </div>
+
+  <!-- スキャナー（z-index:10、中央下） -->
+  <div class="beep" id="beep">ピッ</div>
+  <div class="hw-scanner" id="scanner-zone"
+       ondragover="onScannerOver(event)"
+       ondragleave="onScannerLeave(event)"
+       ondrop="onScannerDrop(event)">
+    <div class="scanner-laser"></div>
+    <span id="scanner-text">📷 商品をかざす</span>
+    <div class="scan-counter" id="scan-counter">0 items</div>
+  </div>
+
+  <!-- カードリーダー（z-index:10、下部台右30%） -->
+  <div class="hw-card" id="card-zone"
+       ondragover="onCardOver(event)"
+       ondragleave="onCardLeave(event)"
+       ondrop="onCardDrop(event)">
+    <div class="card-nfc">📶</div>
+    <span class="card-label">カードをかざす</span>
+  </div>
+
+  <!-- 現金機械（z-index:10、下部台左70%） -->
+  <div class="hw-cash">
+    <div class="cash-slot cash-bill"><span>紙幣 →</span></div>
+    <div class="cash-slot cash-coin"><span>硬貨</span></div>
+    <div class="cash-slot cash-change"><span>おつり</span></div>
+  </div>
+
+  <!-- 店員ボタン（z-index:10、物理ボタン） -->
+  <div class="hw-staff-btn" onclick="callStaff()">🛎️<br><span>店員</span></div>
+</div>
+<!-- 右：カゴ／財布 -->
+<div class="panel basket" id="right-panel">
+  <div class="panel-title" id="right-panel-title">▼ 買い物カゴ</div>
+  <div class="basket-content" id="basket-content"></div>
+  <div class="wallet-content" id="wallet-content" style="display:none"></div>
+</div>
+</div></div>
+</div>
+
+<script>
+// ============ 商品データ ============
+const SIMPLE_MODE = new URLSearchParams(location.search).has('simple');
+const ALL_PRODUCTS = [
+  {id:'milk',icon:'🥛',name:'牛乳',price:228,qty:1},
+  {id:'tomato',icon:'🍅',name:'トマト',price:198,qty:1},
+  {id:'tofu',icon:'⬜',name:'豆腐',price:88,qty:1},
+  {id:'pork',icon:'🥩',name:'豚肉',price:580,qty:1},
+  {id:'choco',icon:'🍫',name:'チョコレート',price:248,qty:1},
+  {id:'beer',icon:'🍺',name:'ビール',price:258,qty:1,ageCheck:true},
+  {id:'yogurt1',icon:'🍶',name:'ヨーグルト',price:158,qty:1,group:'yogurt'},
+  {id:'yogurt2',icon:'🍶',name:'ヨーグルト',price:158,qty:1,group:'yogurt'},
+  {id:'yogurt3',icon:'🍶',name:'ヨーグルト',price:158,qty:1,group:'yogurt'}
+];
+// シンプルモード: ビール・ヨーグルト重複を除外し5商品のみ
+const PRODUCTS = SIMPLE_MODE
+  ? ALL_PRODUCTS.filter(p => !p.ageCheck && p.id !== 'yogurt2' && p.id !== 'yogurt3')
+  : ALL_PRODUCTS;
+const ID_CARDS = [
+  {id:'point',icon:'🎴',name:'ポイントカード',meta:'● MART POINT',cls:'point',useFor:'point'},
+  {id:'shop',icon:'🏪',name:'店舗プリペイド',meta:'● MART CARD',cls:'shop',useFor:'pay'},
+  {id:'credit',icon:'💳',name:'クレジットカード',meta:'VISA / MASTER',cls:'credit',useFor:'pay'},
+  {id:'health',icon:'🏥',name:'健康保険証',meta:'IDENTITY ONLY',cls:'health',useFor:'none'},
+  {id:'license',icon:'🪪',name:'運転免許証',meta:'IDENTITY ONLY',cls:'license',useFor:'none'},
+];
+const state = {
+  current:'welcome',bagType:null,bagLarge:0,bagSmall:0,payMethod:null,scanned:[],
+  draggingId:null,draggingType:null,hoverStartTime:null,scanLockUntil:0,
+  ageVerified:false,scannerLocked:false,pointApplied:false,pointBalance:0,paid:false,pointMode:null,pendingDupProduct:null,pendingDupReason:null
+};
+function $(id){return document.getElementById(id)}
+function fmt(n){return '¥'+n.toLocaleString()}
+// 同じ商品（同じバーコード）かどうかの識別キー。同グループは同一商品とみなす
+function prodKey(item){return item.group||String(item.id).replace(/_(add|dup)_.*$/,'')}
+
+const SCREEN_NUMS={welcome:'S1',['point-ask']:'S2',['point-scan']:'S2b',['bag-select']:'S3',scan:'S4',confirm:'S5',['pay-tap']:'S6',notice:'S6b',done:'S7'};
+function showScreen(name){
+  document.querySelectorAll('.screen-state').forEach(el=>{
+    el.classList.toggle('active',el.dataset.screen===name);
+  });
+  state.current=name;
+  // 画面番号表示
+  let numEl=document.getElementById('screen-num');
+  if(!numEl){numEl=document.createElement('div');numEl.id='screen-num';numEl.className='screen-num';$('screen-area').appendChild(numEl)}
+  numEl.textContent=SCREEN_NUMS[name]||'';
+  const scanArmed=(name==='scan')&&!state.scannerLocked;
+  $('scanner-zone').classList.toggle('armed',scanArmed);
+  const cardArmed=(name==='point-scan'||name==='pay-tap');
+  $('card-zone').classList.toggle('armed',cardArmed);
+  const showWallet=['point-ask','point-scan','confirm','pay-tap','done'].includes(name);
+  $('basket-content').style.display=showWallet?'none':'';
+  $('wallet-content').style.display=showWallet?'flex':'none';
+  $('right-panel-title').textContent=showWallet?'▼ 財布':'▼ 買い物カゴ';
+  if(showWallet) renderWallet();
+  resetIdleTimer();
+}
+function goTo(name){
+  if(name==='scan') renderCartList();
+  if(name==='confirm') renderConfirmList();
+  if(name==='pay-tap') setupPayAmount();
+  if(name==='done') runDoneCountdown();
+  showScreen(name);
+}
+function selectBag(type){state.bagType=type;renderBag();goTo('scan')}
+function getBagPrice(){
+  return (state.bagLarge||0)*5 + (state.bagSmall||0)*3;
+}
+function changeBagQty(size,delta){
+  if(size==='large'){state.bagLarge=Math.max(0,(state.bagLarge||0)+delta);$('bag-large-qty').textContent=state.bagLarge}
+  else{state.bagSmall=Math.max(0,(state.bagSmall||0)+delta);$('bag-small-qty').textContent=state.bagSmall}
+  $('bag-total-display').textContent=fmt(getBagPrice());
+}
+function confirmBag(){
+  if(getBagPrice()>0) state.bagType='plastic';
+  else state.bagType='mybag';
+  renderBag();goTo('scan');
+}
+function renderBag(){
+  const c=$('bag-content');c.classList.remove('empty');
+  const bagPrice=getBagPrice();
+  const hasBag=state.bagType&&state.bagType!=='mybag';
+  const bagClass=hasBag?'plastic':'mybag';
+  let label='マイバッグ';
+  if(hasBag){
+    const parts=[];
+    if(state.bagLarge>0) parts.push(`大×${state.bagLarge}`);
+    if(state.bagSmall>0) parts.push(`小×${state.bagSmall}`);
+    label=`レジ袋（${parts.join('＋')}）${fmt(bagPrice)}`;
+  }
+  const items=state.scanned.map(it=>`<span class="bag-item">${it.icon} ${it.name}</span>`).join('');
+  c.innerHTML=`<div class="bag-visual ${bagClass}">${items}</div><div class="bag-label">${label}（${state.scanned.length}点）</div>`;
+}
+function renderBasket(){
+  const c=$('basket-content');c.innerHTML='';
+  PRODUCTS.forEach(p=>{
+    // 元のidまたは_add_付きidがカートにあるか
+    const isScanned=state.scanned.some(s=>s.id===p.id||s.id.startsWith(p.id+'_add_'));
+    const div=document.createElement('div');
+    div.className='product'+(isScanned?' scanned':'');
+    div.draggable=true;div.dataset.id=p.id;div.dataset.type='product';
+    div.innerHTML=`<div class="product-icon">${p.icon}</div><div class="product-name">${p.name}</div><div class="product-price">${fmt(p.price)}</div><div class="product-barcode">${'<i></i>'.repeat(14)}</div>`;
+    div.addEventListener('dragstart',onDragStart);div.addEventListener('dragend',onDragEnd);
+    c.appendChild(div);
+  });
+}
+function onDragStart(e){
+  state.draggingId=e.currentTarget.dataset.id;
+  state.draggingType=e.currentTarget.dataset.type||'product';
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed='move';
+  e.dataTransfer.setData('text/plain',state.draggingId);
+}
+function onDragEnd(e){
+  e.currentTarget.classList.remove('dragging');
+  state.hoverStartTime=null;state.draggingType=null;
+  clearTimeout(scanDupTimer);scanDupTimer=null;
+  clearInterval(scanRepeatInterval);scanRepeatInterval=null;
+  scanDupCount=0;
+  $('scanner-zone').classList.remove('hover','scanning','active');
+  $('card-zone').classList.remove('hover');
+}
+function renderWallet(){
+  const c=$('wallet-content');
+  let prompt='';
+  if(state.current==='point-ask') prompt='ポイントカードはお持ちですか？';
+  else if(state.current==='point-scan') prompt='<strong>ポイントカード</strong>を<br>カードリーダーにかざしてください';
+  else if(state.current==='pay-tap') prompt='<strong>支払いに使うカード</strong>を<br>カードリーダーにかざしてください';
+  else if(state.current==='confirm') prompt='内容を確認してください';
+  else if(state.current==='done') prompt='ありがとうございました';
+  c.innerHTML=`<div class="wallet-prompt">${prompt}</div>`+
+    ID_CARDS.map(card=>`<div class="id-card ${card.cls}" draggable="true" data-id="${card.id}" data-type="card"><span class="card-icon">${card.icon}</span><div><div>${card.name}</div><div class="card-meta">${card.meta}</div></div></div>`).join('');
+  c.querySelectorAll('.id-card').forEach(el=>{el.addEventListener('dragstart',onDragStart);el.addEventListener('dragend',onDragEnd)});
+}
+// カードリーダー
+function onCardOver(e){e.preventDefault();if(state.draggingType!=='card')return;$('card-zone').classList.add('hover')}
+function onCardLeave(e){$('card-zone').classList.remove('hover')}
+function onCardDrop(e){
+  e.preventDefault();$('card-zone').classList.remove('hover');
+  if(state.draggingType!=='card')return;
+  const id=e.dataTransfer.getData('text/plain')||state.draggingId;
+  const card=ID_CARDS.find(c=>c.id===id);if(!card)return;
+  if(state.current==='point-scan'){
+    if(card.useFor==='point'){
+      state.pointApplied=true;
+      state.pointBalance=1234;// ダミーの保有ポイント
+      playBeep(false);showBeep('ピッ ポイントカード読み取り完了',false);
+      // 読み取り成功表示を出してから袋選択へ
+      document.querySelector('[data-screen="point-scan"]').innerHTML=`
+        <div class="screen-headline" style="color:#4ade80">✓ ポイントカード読み取り完了</div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px">
+          <div style="font-size:48px">🎴</div>
+          <div style="font-size:16px;color:#94a3b8">現在の保有ポイント</div>
+          <div style="font-size:36px;font-weight:900;color:#fbbf24">${state.pointBalance.toLocaleString()} pt</div>
+        </div>
+        <button class="btn btn-large btn-success" onclick="goTo('bag-select')">次へ →</button>
+      `;
+    }else{playBeep(true);showBeep('ポイントカードをかざしてください',true)}
+  }else if(state.current==='pay-tap'){
+    if(card.useFor==='pay'){state.paid=true;playBeep(false);showBeep('ピッ 決済完了',false);setTimeout(()=>goTo('done'),700)}
+    else if(card.useFor==='point'){playBeep(true);showBeep('支払いカードを選んでください',true)}
+    else{playBeep(true);showBeep('そのカードでは支払えません',true)}
+  }
+}
+// ポイントモード選択
+function selectPointMode(mode){
+  state.pointMode=mode;
+  $('point-scan-title').textContent=mode==='save'?'ポイントを貯める — カードをかざしてください':'ポイントで支払う — カードをかざしてください';
+  goTo('point-scan');
+}
+// スキャナー
+let scanDupCount=0;
+let scanDupTimer=null;
+function onScannerOver(e){
+  e.preventDefault();if(state.current!=='scan')return;if(state.scannerLocked)return;
+  if(state.draggingType!=='product')return;
+  const z=$('scanner-zone');z.classList.add('hover','active');
+  if(!state.hoverStartTime){
+    state.hoverStartTime=Date.now();
+    const id=state.draggingId;
+    const product=PRODUCTS.find(p=>p.id===id);
+    if(!product)return;
+    // 同じ商品（同じバーコード＝同種）が既にカートにあるか
+    const alreadyInCart=!SIMPLE_MODE && state.scanned.some(s=>prodKey(s)===prodKey(product));
+    if(alreadyInCart){
+      // 2回目以降: 即座に確認モーダル（別個体を改めてかざした＝もう1点欲しいケース）
+      state.pendingDupProduct=product;
+      state.pendingDupReason='rescan';
+      $('dup-confirm-text').innerHTML=`<strong>${product.icon} ${product.name}</strong> は既にスキャン済みです。<br>もう1点追加しますか？`;
+      $('dup-confirm-modal').classList.add('active');
+      state.scannerLocked=true;
+      playBeep(true);showBeep('ピピッ — 同じ商品です',true);
+    } else {
+      // 1回目: 即座にスキャン
+      state.scanned.push({...product});
+      playBeep(false);showBeep('ピッ',false);
+      renderCartList();renderBasket();renderBag();resetIdleTimer();
+      if(product.ageCheck&&!state.ageVerified) openAgeModal();
+      // 700ms後に2回目の確認モーダル（同じものをかざし続けた誤二度読み）
+      if(!SIMPLE_MODE) scanDupTimer=setTimeout(()=>{
+        if(!state.hoverStartTime)return;
+        z.classList.add('scanning');
+        state.pendingDupProduct=product;
+        state.pendingDupReason='doubleread';
+        $('dup-confirm-text').innerHTML=`<strong>${product.icon} ${product.name}</strong> が2回読み取られました。<br>もう1点追加しますか？`;
+        $('dup-confirm-modal').classList.add('active');
+        state.scannerLocked=true;
+        playBeep(true);showBeep('ピピッ — 同じ商品です',true);
+      },700);
+    }
+  }
+}
+function onScannerLeave(e){
+  const scanner=$('scanner-zone');
+  if(scanner.contains(e.relatedTarget)) return;
+  scanner.classList.remove('hover','scanning','active');
+  state.hoverStartTime=null;
+  clearTimeout(scanDupTimer);scanDupTimer=null;
+}
+function onScannerDrop(e){
+  e.preventDefault();if(state.current!=='scan')return;
+  if(state.scannerLocked){showBeep('確認してください',true);return}
+  // ホバーで既にスキャン済みなのでドロップ時は追加処理不要
+  state.hoverStartTime=null;
+  clearTimeout(scanDupTimer);scanDupTimer=null;
+  $('scanner-zone').classList.remove('hover','scanning','active');
+}
+function confirmDuplicate(){
+  const p=state.pendingDupProduct;
+  if(p){
+    if(state.pendingDupReason==='doubleread'){
+      // 誤二度読みを承認: 重複（赤字・店員のみ取消可）として追加
+      state.scanned.push({...p,id:p.id+'_add_'+Date.now(),duplicate:true});
+    }else{
+      // 別個体を改めてかざした正当な追加: 通常商品として追加
+      state.scanned.push({...p,id:p.id+'_add_'+Date.now()});
+    }
+    renderCartList();renderBasket();renderBag();
+  }
+  state.pendingDupProduct=null;
+  state.pendingDupReason=null;
+  state.scannerLocked=false;
+  $('dup-confirm-modal').classList.remove('active');
+  $('scanner-zone').classList.add('armed');
+  resetIdleTimer();
+}
+function denyDuplicate(){
+  state.pendingDupProduct=null;
+  state.pendingDupReason=null;
+  state.scannerLocked=false;
+  $('dup-confirm-modal').classList.remove('active');
+  $('scanner-zone').classList.add('armed');
+  showBeep('取り消しました',false);
+  resetIdleTimer();
+}
+function doScan(product,duplicate){
+  // 1個目は必ず追加＋ピッ
+  state.scanned.push({...product});
+  playBeep(false);
+  showBeep('ピッ',false);
+  renderCartList();renderBasket();renderBag();resetIdleTimer();
+  if(duplicate){
+    // 700ms後に2個目追加＋2回目のピッ＋「同じ商品です」表示
+    setTimeout(()=>{
+      state.scanned.push({...product,id:product.id+'_dup_'+Date.now(),name:product.name+'(重複)',duplicate:true});
+      playBeep(false);
+      showBeep('ピッ — 同じ商品です',true);
+      renderCartList();renderBag();
+    },400);
+  }
+  if(product.ageCheck&&!state.ageVerified) openAgeModal();
+}
+function openAgeModal(){state.scannerLocked=true;$('age-modal').classList.add('active');$('scanner-zone').classList.remove('armed')}
+function ageConfirm(){state.ageVerified=true;state.scannerLocked=false;$('age-modal').classList.remove('active');$('scanner-zone').classList.add('armed');resetIdleTimer()}
+function ageDeny(){$('age-modal').classList.remove('active');$('staff-modal').classList.add('active')}
+// ビープ音
+let audioCtx=null;
+function ensureAudio(){if(!audioCtx){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){return null}}if(audioCtx.state==='suspended')audioCtx.resume();return audioCtx}
+function playBeep(isDup){const ctx=ensureAudio();if(!ctx)return;if(isDup){beepTone(ctx,0,1800,0.07,0.18);beepTone(ctx,0.10,1800,0.07,0.18)}else{beepTone(ctx,0,2000,0.10,0.22)}}
+function beepTone(ctx,off,freq,dur,vol){const t0=ctx.currentTime+off;const o=ctx.createOscillator();const g=ctx.createGain();o.type='square';o.frequency.setValueAtTime(freq,t0);g.gain.setValueAtTime(0,t0);g.gain.linearRampToValueAtTime(vol,t0+0.005);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);o.connect(g);g.connect(ctx.destination);o.start(t0);o.stop(t0+dur+0.02)}
+function showBeep(text,isErr){const b=$('beep');b.textContent=text;b.classList.toggle('error',!!isErr);b.classList.add('show');setTimeout(()=>b.classList.remove('show'),700)}
+function renderCartList(){
+  const c=$('cart-list');
+  const bagPrice=getBagPrice();
+  if(state.scanned.length===0&&bagPrice===0){c.innerHTML='<div style="color:#64748b;text-align:center">まだ何もスキャンされていません</div>'}
+  else{
+    let html='';
+    // 袋代を先頭に表示
+    if(state.bagLarge>0) html+=`<div class="cart-row"><span>🛍️ レジ袋（大）×${state.bagLarge}</span><span>${fmt(state.bagLarge*5)}</span></div>`;
+    if(state.bagSmall>0) html+=`<div class="cart-row"><span>🛍️ レジ袋（小）×${state.bagSmall}</span><span>${fmt(state.bagSmall*3)}</span></div>`;
+    // 商品
+    html+=state.scanned.map(it=>`<div class="cart-row${it.duplicate?' duplicate':''}"><span>${it.icon} ${it.name}</span><span>${fmt(it.price)}</span></div>`).join('');
+    c.innerHTML=html;
+  }
+  const total=state.scanned.reduce((s,it)=>s+it.price,0)+bagPrice;
+  $('total-amount').textContent=fmt(total);
+  $('scan-counter').textContent=`スキャン済み: ${state.scanned.length} 点`;
+}
+function onCheckoutClick(){if(state.scanned.length===0){showBeep('商品をスキャンしてください',true);return}goTo('confirm')}
+function renderConfirmList(){
+  const c=$('confirm-list');
+  let html='';
+  // 袋代
+  if(state.bagLarge>0) html+=`<div class="cart-row"><span>🛍️ レジ袋（大）×${state.bagLarge}</span><span>${fmt(state.bagLarge*5)}</span></div>`;
+  if(state.bagSmall>0) html+=`<div class="cart-row"><span>🛍️ レジ袋（小）×${state.bagSmall}</span><span>${fmt(state.bagSmall*3)}</span></div>`;
+  // 商品
+  html+=state.scanned.map(it=>`<div class="cart-row${it.duplicate?' duplicate':''}"><span>${it.icon} ${it.name}</span><span>${fmt(it.price)}</span></div>`).join('');
+  if(state.pointApplied) html+=`<div class="cart-row" style="color:#4ade80"><span>🎴 ポイント割引</span><span>-¥100</span></div>`;
+  c.innerHTML=html;
+  let total=state.scanned.reduce((s,it)=>s+it.price,0)+getBagPrice()-(state.pointApplied?100:0);
+  total=Math.max(0,total);
+  $('confirm-amount').textContent=fmt(total);
+  $('done-amount').textContent=fmt(total);
+  // 今回貯まるポイント（100円で1pt、袋代除く）
+  const earnPoints=Math.floor(state.scanned.reduce((s,it)=>s+it.price,0)/100);
+  const pointEl=document.getElementById('earn-points');
+  if(pointEl) pointEl.textContent=state.pointApplied?`今回 +${earnPoints}pt 貯まります（保有: ${state.pointBalance.toLocaleString()}pt）`:'';
+}
+function setupPayAmount(){const t=state.scanned.reduce((s,it)=>s+it.price,0)+getBagPrice()-(state.pointApplied?100:0);$('pay-amount').textContent=fmt(Math.max(0,t))}
+let doneTimer=null;
+function runDoneCountdown(){let n=3;$('done-countdown').textContent=`${n}秒後に初期画面に戻ります...`;clearInterval(doneTimer);doneTimer=setInterval(()=>{n--;if(n<=0){clearInterval(doneTimer);resetAll()}else{$('done-countdown').textContent=`${n}秒後に初期画面に戻ります...`}},1000)}
+let idleTimer=null,idleCountdownTimer=null;
+function resetIdleTimer(){if(SIMPLE_MODE)return;clearTimeout(idleTimer);closeIdleModal();if(state.current==='welcome'||state.current==='done')return;idleTimer=setTimeout(showIdleModal,30000)}
+function showIdleModal(){$('idle-modal').classList.add('active');let n=15;$('idle-countdown').textContent=n;clearInterval(idleCountdownTimer);idleCountdownTimer=setInterval(()=>{n--;$('idle-countdown').textContent=n;if(n<=0){clearInterval(idleCountdownTimer);resetAll()}},1000)}
+function resumeIdle(){closeIdleModal();resetIdleTimer()}
+function closeIdleModal(){$('idle-modal').classList.remove('active');clearInterval(idleCountdownTimer)}
+function closeCancelModal(){$('cancel-modal').classList.remove('active')}
+function callStaff(){
+  $('staff-modal').classList.add('active');
+  // 重複商品があれば表示
+  const dups=state.scanned.filter(it=>it.duplicate);
+  const sec=$('staff-dup-section');
+  if(dups.length>0){
+    sec.style.display='block';
+    $('staff-dup-list').innerHTML=dups.map(it=>`<div>・${it.icon} ${it.name}</div>`).join('');
+  }else{sec.style.display='none'}
+  resetIdleTimer();
+}
+function staffRemoveDuplicates(){
+  state.scanned=state.scanned.filter(it=>!it.duplicate);
+  renderCartList();renderBag();
+  $('staff-dup-section').style.display='none';
+  showBeep('店員が重複を取り消しました',false);
+  closeStaffModal();
+}
+function closeStaffModal(){$('staff-modal').classList.remove('active');if(state.scannerLocked&&!state.ageVerified){state.ageVerified=true;state.scannerLocked=false;$('scanner-zone').classList.add('armed')}}
+function resetAll(){
+  state.current='welcome';state.bagType=null;state.bagLarge=0;state.bagSmall=0;state.payMethod=null;state.scanned=[];
+  state.hoverStartTime=null;state.ageVerified=false;state.scannerLocked=false;
+  state.pointApplied=false;state.paid=false;state.draggingType=null;state.pointMode=null;
+  $('bag-content').classList.add('empty');$('bag-content').innerHTML='<div>レジ操作を開始すると<br>ここに袋が出ます</div>';
+  $('age-modal').classList.remove('active');renderCartList();renderBasket();
+  closeIdleModal();closeCancelModal();$('staff-modal').classList.remove('active');
+  clearInterval(doneTimer);showScreen('welcome');
+}
+function tickClock(){const d=new Date();const p=n=>String(n).padStart(2,'0');$('clock').textContent=`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`}
+renderBasket();renderCartList();tickClock();setInterval(tickClock,1000);
+// ハッシュルーティング: #scan 等で特定画面を初期表示
+const _initScreen=location.hash.slice(1);
+if(_initScreen&&document.querySelector(`[data-screen="${_initScreen}"]`)){
+  ensureAudio();
+  if(['scan','point-scan','confirm','pay-tap','done'].includes(_initScreen)){state.bagType='plastic-s';renderBag()}
+  showScreen(_initScreen);
+}else{showScreen('welcome')}
+</script>
+
+<div class="note">
+  <strong>使い方:</strong> 右のカゴから商品をドラッグして中央の<strong>赤く光るスキャナー</strong>にかざすと「ピッ」とスキャンされ、左の袋に入ります。
+  ヨーグルト3個は1個ずつ、<strong>少しでも長くかざすと2個読み取られます。</strong>
+  ビールをスキャンすると年齢確認モーダル。会計に進むと右が<strong>財布</strong>に切り替わり、ポイントカードや支払いカードを<strong>アイボリーのカードリーダー</strong>にかざします。
+  保険証や免許をかざしても支払えません。30秒操作しないと中断モーダル。完了画面は3秒で消えます。
+</div>
+</div>
+</body>
+</html>
