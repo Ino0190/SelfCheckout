@@ -498,6 +498,8 @@ const state = {
   ageVerified:false,scannerLocked:false,pointApplied:false,pointBalance:0,paid:false,pointMode:null,pendingDupProduct:null,pendingDupReason:null
 };
 function $(id){return document.getElementById(id)}
+// ポイント読み取り画面の元HTML（カードをかざすと内容を書き換えるため、入り直すたびに復元する）
+const POINT_SCAN_HTML=document.querySelector('[data-screen="point-scan"]').innerHTML;
 function fmt(n){return '¥'+n.toLocaleString()}
 // 同じ商品（同じバーコード）かどうかの識別キー。同グループは同一商品とみなす
 function prodKey(item){return item.group||String(item.id).replace(/_(add|dup)_.*$/,'')}
@@ -524,6 +526,11 @@ function showScreen(name){
   resetIdleTimer();
 }
 function goTo(name){
+  if(name==='point-ask'){
+    // ポイント関連の状態を初期化（前の取引や読み取り済み表示を持ち越さない）
+    state.pointApplied=false;state.pointBalance=0;
+    document.querySelector('[data-screen="point-scan"]').innerHTML=POINT_SCAN_HTML;
+  }
   if(name==='scan') renderCartList();
   if(name==='confirm') renderConfirmList();
   if(name==='pay-tap') setupPayAmount();
@@ -756,8 +763,8 @@ function renderCartList(){
     // 袋代を先頭に表示
     if(state.bagLarge>0) html+=`<div class="cart-row"><span>🛍️ レジ袋（大）×${state.bagLarge}</span><span>${fmt(state.bagLarge*5)}</span></div>`;
     if(state.bagSmall>0) html+=`<div class="cart-row"><span>🛍️ レジ袋（小）×${state.bagSmall}</span><span>${fmt(state.bagSmall*3)}</span></div>`;
-    // 商品
-    html+=state.scanned.map(it=>`<div class="cart-row${it.duplicate?' duplicate':''}"><span>${it.icon} ${it.name}</span><span>${fmt(it.price)}</span></div>`).join('');
+    // 商品（各行に取り消しボタン。誤二度読みの重複行は店員のみ取消可なのでボタンなし）
+    html+=state.scanned.map((it,i)=>`<div class="cart-row${it.duplicate?' duplicate':''}"><span>${it.icon} ${it.name}</span><span style="display:flex;align-items:center;gap:8px">${fmt(it.price)}${it.duplicate?'':`<button onclick="removeScanned(${i})" style="background:#475569;color:#fff;border:none;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">✕ 取消</button>`}</span></div>`).join('');
     c.innerHTML=html;
   }
   const total=state.scanned.reduce((s,it)=>s+it.price,0)+bagPrice;
@@ -765,6 +772,19 @@ function renderCartList(){
   $('scan-counter').textContent=`スキャン済み: ${state.scanned.length} 点`;
 }
 function onCheckoutClick(){if(state.scanned.length===0){showBeep('商品をスキャンしてください',true);return}goTo('confirm')}
+// スキャン済み商品を1点取り消す（買い物客が自分で操作）
+function removeScanned(index){
+  const removed=state.scanned[index];
+  if(!removed)return;
+  state.scanned.splice(index,1);
+  // 取り消した商品が年齢確認対象で、同種がもう残っていなければ年齢確認を解除
+  if(removed.ageCheck){
+    const stillHasAgeItem=state.scanned.some(s=>s.ageCheck);
+    if(!stillHasAgeItem) state.ageVerified=false;
+  }
+  showBeep(`${removed.icon} ${removed.name} を取り消しました`,false);
+  renderCartList();renderBasket();renderBag();resetIdleTimer();
+}
 function renderConfirmList(){
   const c=$('confirm-list');
   let html='';
@@ -816,6 +836,8 @@ function resetAll(){
   state.current='welcome';state.bagType=null;state.bagLarge=0;state.bagSmall=0;state.payMethod=null;state.scanned=[];
   state.hoverStartTime=null;state.ageVerified=false;state.scannerLocked=false;
   state.pointApplied=false;state.paid=false;state.draggingType=null;state.pointMode=null;
+  state.pointBalance=0;
+  document.querySelector('[data-screen="point-scan"]').innerHTML=POINT_SCAN_HTML;
   $('bag-content').classList.add('empty');$('bag-content').innerHTML='<div>レジ操作を開始すると<br>ここに袋が出ます</div>';
   $('age-modal').classList.remove('active');renderCartList();renderBasket();
   closeIdleModal();closeCancelModal();$('staff-modal').classList.remove('active');
